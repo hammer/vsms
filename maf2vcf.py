@@ -1,4 +1,6 @@
 import itertools
+import psycopg2
+import psycopg2.extras
 import vcf
 
 
@@ -81,20 +83,17 @@ def genotypes_to_records(genotypes, reader, extant_columns):
         records.append(record)
     return records
 
-
 def _fields_from_columns(columns):
     # 7 == 'sample:', 5 == 'info:' -- we're stripping them off the column names.
     format_fields = [c[7:] for c in columns if c.startswith('sample:')]
     info_fields = [c[5:] for c in columns if c.startswith('info:')]
     return info_fields, format_fields
 
-
 def _maybe_split(string, char):
     if string:
         return string.split(char)
     else:
         return None
-
 
 def _make_record_from_gt(genotype, info_fields, format_fields, samples):
     gt = genotype
@@ -110,7 +109,6 @@ def _make_record_from_gt(genotype, info_fields, format_fields, samples):
                              ':'.join(format_fields),              # FORMAT
                              [0],                               # sample_indexes
                              samples=samples)                   # samples/calls
-
 
 def genotypes_to_file(genotypes, header, extant_columns, fd):
     """Write genotypes to a VCF file.
@@ -130,33 +128,40 @@ def genotypes_to_file(genotypes, header, extant_columns, fd):
 if __name__ == '__main__':
     header = '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tNORMAL\tTUMOR'
     template = vcf.Reader(header)
-    genotypes = \
-    [
-        {
-            'sample_name': 'TUMOR',
-            'contig': 'chr7',
-            'position': 151879673,
-            'id': '',
-            'reference': 'G',
-            'alternates': 'A',
-            'quality': '',
-            'filters': 'PASS',
-            'sample:GT': '0/1'
-        },
-        {
-            'sample_name': 'NORMAL',
-            'contig': 'chr7',
-            'position': 151879673,
-            'id': '',
-            'reference': 'G',
-            'alternates': 'A',
-            'quality': '',
-            'filters': 'PASS',
-            'sample:GT': '0/0'
-        }
-    ]
-    extant_columns = ['sample:GT']
-    outfile = open('/Users/hammer/Desktop/blah.vcf', 'w')
-    genotypes_to_file(genotypes, header, extant_columns, outfile)
+    connection = psycopg2.connect(user='hammer', database='hammer')
+    cursor = connection.cursor(cursor_factory = psycopg2.extras.DictCursor)
+    cursor.execute("SELECT * FROM vsm_filtered")
+    vsms = cursor.fetchall()
+    grouped_vsms = itertools.groupby(vsms, lambda x: x['Patient Barcode'])
+    for participant, vsms in grouped_vsms:
+        genotypes = []
+        for vsm in vsms:
+            genotypes += [
+                {
+                    'sample_name': 'TUMOR',
+                    'contig': 'chr' + vsm['Chromosome Number'],
+                    'position': int(vsm['Start Position']),
+                    'id': '',
+                    'reference': vsm['Ref Allele'],
+                    'alternates': vsm['Tumor Allele'],
+                    'quality': '',
+                    'filters': 'PASS',
+                    'sample:GT': '0/1'
+                },
+                {
+                    'sample_name': 'NORMAL',
+                    'contig': 'chr' + vsm['Chromosome Number'],
+                    'position': int(vsm['Start Position']),
+                    'id': '',
+                    'reference': vsm['Ref Allele'],
+                    'alternates': vsm['Tumor Allele'],
+                    'quality': '',
+                    'filters': 'PASS',
+                    'sample:GT': '0/0'
+                }
+            ]
+        extant_columns = ['sample:GT']
+        outfile = open('/Users/hammer/Desktop/vcfs/%s.vcf' % participant, 'w')
+        genotypes_to_file(genotypes, header, extant_columns, outfile)
 
 
